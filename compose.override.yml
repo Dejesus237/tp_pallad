@@ -1,0 +1,48 @@
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  backend:
+    env_file:
+      - ${ENV_FILE:-.env}
+    volumes:
+      - ./apps/backend:/app/apps/backend
+
+    # Optional: expose Django directly for debugging (normally go through gateway)
+    # ports:
+    #   - "8000:8000"
+
+  worker:
+    env_file:
+      - ${ENV_FILE:-.env}
+    volumes:
+      - ./apps/backend:/app/apps/backend
+
+  beat:
+    env_file:
+      - ${ENV_FILE:-.env}
+    volumes:
+      - ./apps/backend:/app/apps/backend
+
+  frontend:
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: "/api"
+    volumes:
+      - ./apps/frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+    # Optional: expose Next directly for debugging (normally go through gateway)
+    # ports:
+    #   - "3000:3000"
+
+  gateway:
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/local.conf:/etc/nginx/nginx.conf:ro
