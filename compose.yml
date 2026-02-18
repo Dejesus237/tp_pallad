@@ -92,5 +92,16 @@ services:
       - backend
       - frontend
 
+  trivy-scan:
+    image: aquasec/trivy:latest
+    volumes:
+      - .:/root/
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Ajout du cache pour éviter de tout retélécharger à chaque fois
+      - trivy-cache:/root/.cache
+    entrypoint: ["trivy"]
+    command: ["config", "/root/"]
+
 volumes:
   pgdata:
+  trivy-cache:
