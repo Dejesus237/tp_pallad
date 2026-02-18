@@ -1,0 +1,110 @@
+name: SonarQube Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache SonarQube packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Build and analyze
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_LOGIN: ${{ secrets.SONAR_TOKEN }}
+        run: mvn clean verify sonar:sonar -Dsonar.projectKey=tp_pallad
+
+      - name: Get SonarQube results
+        id: sonar-results
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          QUALITY_GATE=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+            "${{ secrets.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=tp_pallad" \
+            | jq -r '.projectStatus.status')
+          echo "quality_gate=$QUALITY_GATE" >> $GITHUB_OUTPUT
+          
+          BUGS=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=tp_pallad&metricKeys=bugs" \
+            | jq -r '.component.measures[0].value // "0"')
+          echo "bugs=$BUGS" >> $GITHUB_OUTPUT
+          
+          VULNERABILITIES=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=tp_pallad&metricKeys=vulnerabilities" \
+            | jq -r '.component.measures[0].value // "0"')
+          echo "vulnerabilities=$VULNERABILITIES" >> $GITHUB_OUTPUT
+          
+          CODE_SMELLS=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=tp_pallad&metricKeys=code_smells" \
+            | jq -r '.component.measures[0].value // "0"')
+          echo "code_smells=$CODE_SMELLS" >> $GITHUB_OUTPUT
+          
+          COVERAGE=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=tp_pallad&metricKeys=coverage" \
+            | jq -r '.component.measures[0].value // "0"')
+          echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with SonarQube results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const qualityGate = "${{ steps.sonar-results.outputs.quality_gate }}";
+            const bugs = "${{ steps.sonar-results.outputs.bugs }}";
+            const vulnerabilities = "${{ steps.sonar-results.outputs.vulnerabilities }}";
+            const codeSmells = "${{ steps.sonar-results.outputs.code_smells }}";
+            const coverage = "${{ steps.sonar-results.outputs.coverage }}";
+            
+            const statusIcon = qualityGate === "OK" ? "✅" : "❌";
+            
+            const comment = `## ${statusIcon} Analyse SonarQube
+
+| Métrique | Résultat |
+|----------|----------|
+| **Quality Gate** | ${qualityGate} |
+| **Bugs** | 🐛 ${bugs} |
+| **Vulnérabilités** | 🔒 ${vulnerabilities} |
+| **Code Smells** | 👃 ${codeSmells} |
+| **Couverture** | 📊 ${coverage}% |
+
+🔗 [Voir le rapport complet](${process.env.SONAR_HOST_URL}/dashboard?id=tp_pallad)`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if Quality Gate failed
+        if: steps.sonar-results.outputs.quality_gate != 'OK'
+        run: exit 1
